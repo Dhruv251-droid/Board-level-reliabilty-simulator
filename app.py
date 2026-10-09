@@ -4,7 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import requests
-import time
+import datetime
+import random
 
 def calculate_cpk(data, lsl, usl):
     mean = np.mean(data)
@@ -25,42 +26,53 @@ st.markdown("Integrated platform for **Reliability Engineering (JEDEC standards)
 st.sidebar.header("Data Source")
 data_source = st.sidebar.radio("Select Data Source:", ["Local CSV (Historical)", "Real-time Lab API"])
 
-@st.cache_data(ttl=60) # Cache clears every 60 seconds
+@st.cache_data(ttl=60)
 def load_csv_data():
     try:
         return pd.read_csv("thermal_simulation_data.csv")
     except FileNotFoundError:
         return None
 
-df = None
+df = load_csv_data()
+
 if data_source == "Local CSV (Historical)":
-    df = load_csv_data()
     if df is None:
         st.error("Data file not found. Please run simulate_data.py first.")
 else:
     # --- REAL TIME API MOCK ---
     st.sidebar.info("🔌 Listening to equipment IoT feeds...")
+    live_payload = None
     try:
-        response = requests.get("http://localhost:8000/api/live_equipment_data")
+        # Attempt to reach the local backend if running locally
+        response = requests.get("http://localhost:8000/api/live_equipment_data", timeout=1)
         if response.status_code == 200:
             live_payload = response.json()
-            st.sidebar.success(f"Latest read from: {live_payload['Equipment_ID']}")
-            st.sidebar.json(live_payload)
-            
-            # For the dashboard, we still need historical context to calculate CpK,
-            # so we'll load the historical CSV and append the live data to it.
-            base_df = load_csv_data()
-            if base_df is not None:
-                live_df = pd.DataFrame([live_payload])
-                # Append live read to the data
-                df = pd.concat([base_df, live_df], ignore_index=True)
-            else:
-                df = pd.DataFrame([live_payload])
-                
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+        # Fallback for Streamlit Cloud deployment demo
+        # If backend is unreachable, we simulate the backend response directly here
+        live_payload = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "Batch_ID": f"LIVE_LOT_{random.randint(1000, 9999)}",
+            "Test_Type": random.choice(["Temp Cycling", "HAST", "HTS"]),
+            "Equipment_ID": random.choice(["Oven_A", "Oven_B", "HAST_Chamber_1", "HTS_Chamber_2"]),
+            "Thermal_Cycles": random.randint(500, 2000),
+            "Max_Temp_C": round(random.uniform(125.0, 150.0), 2),
+            "Output_Voltage_mV": round(random.uniform(3200.0, 3400.0), 2),
+            "TAT_Days": round(random.uniform(10.0, 18.0), 1),
+            "Status": "Running"
+        }
+        st.sidebar.caption("*(Note: Using internal mock stream. Local FastAPI backend not detected on port 8000)*")
+
+    if live_payload:
+        st.sidebar.success(f"Latest read from: {live_payload['Equipment_ID']}")
+        st.sidebar.json(live_payload)
+        
+        # Append live read to historical data
+        if df is not None:
+            live_df = pd.DataFrame([live_payload])
+            df = pd.concat([df, live_df], ignore_index=True)
         else:
-            st.sidebar.error(f"API returned status: {response.status_code}")
-    except requests.exceptions.ConnectionError:
-        st.sidebar.error("❌ Connection Refused. Is the FastAPI server running? (Run `python -m uvicorn api_server:app`)")
+            df = pd.DataFrame([live_payload])
 
 # ----------------------------------------------------------------------
 # DASHBOARD RENDERING
@@ -68,9 +80,6 @@ else:
 if df is not None and not df.empty:
     tab1, tab2 = st.tabs(["🔧 Reliability Engineering (Process & CpK)", "📊 Tactical Planning & Lab Operations"])
     
-    # ----------------------------------------------------------------------
-    # TAB 1: RELIABILITY ENGINEERING
-    # ----------------------------------------------------------------------
     with tab1:
         st.header("Process Capability & DOE Analysis")
         st.markdown("*Emulating PCB Board-Level Reliability under JEDEC standard conditions (HAST, HTS, Temp Cycling).*")
@@ -80,7 +89,6 @@ if df is not None and not df.empty:
             LSL = 3150.0
             USL = 3450.0
             
-            # Ensure Output Voltage is numeric (API returns floats, but just in case)
             df['Output_Voltage_mV'] = pd.to_numeric(df['Output_Voltage_mV'], errors='coerce')
             voltages = df['Output_Voltage_mV'].dropna().values
             
@@ -110,7 +118,7 @@ if df is not None and not df.empty:
 
         if cpk_value < 1.33:
             st.error("🚨 **PROCESS DEVIATION DETECTED**: CpK < 1.33. Generating 8D Report.")
-            with st.expander("📄 View Automated 8D Troubleshooting Report", expanded=True):
+            with st.expander("📄 View Automated 8D Troubleshooting Report", expanded=False):
                 st.markdown("""
                 **D1: Form the Team** | Cross-functional team (Quality, Mfg, Planning) assembled.
                 
@@ -128,10 +136,9 @@ if df is not None and not df.empty:
                 
                 **D8: Recognize the Team** | Issue contained.
                 """)
+        else:
+            st.success(f"✅ Process is capable. CpK is {cpk_value:.2f} (Target >= 1.33).")
 
-    # ----------------------------------------------------------------------
-    # TAB 2: TACTICAL PLANNING & LAB OPERATIONS
-    # ----------------------------------------------------------------------
     with tab2:
         st.header("Lab Loading & Turn Around Time (TAT) Management")
         st.markdown("*Scheduling, Equipment Utilization, and KPI tracking for Reliability Program Monitoring (RPM).*")
