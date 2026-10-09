@@ -109,8 +109,7 @@ if df is not None and not df.empty:
         fig_doe = px.scatter(
             df, x="Thermal_Cycles", y="Output_Voltage_mV", color="Test_Type",
             title="DOE Evaluation: Process Deviation under Thermal Stress",
-            labels={"Thermal_Cycles": "Thermal Cycles", "Output_Voltage_mV": "Output Voltage (mV)"},
-            trendline="ols" if len(df) > 1 else None
+            labels={"Thermal_Cycles": "Thermal Cycles", "Output_Voltage_mV": "Output Voltage (mV)"}
         )
         fig_doe.add_hline(y=LSL, line_dash="dash", line_color="red", annotation_text="LSL")
         fig_doe.add_hline(y=USL, line_dash="dash", line_color="red", annotation_text="USL")
